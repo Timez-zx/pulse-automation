@@ -38,9 +38,18 @@ to `--out-dir` and prints a percentile summary. Per-run logs (FT etc.) go to
 
 ## Behavior
 
-- FT (if any) starts first and warms 3 s, so the stream is measured under
-  established 5G contention.
-- 5G is warmed with a ping burst before a pulse run (RRC idle→active).
+Startup sequence (mirrors `5g-dl-property-pi/run_dl_measurements.py`):
+
+1. **preflight** — ssh reachability, video file + binaries present, netns for FT.
+2. **connectivity check / warmup** — ping every UE/path the run will use and
+   abort if any is unreachable: edge0→Pi over **WiFi** (both modes) and over
+   **5G** (pulse; also wakes the modem from RRC-idle), plus each FT sim-UE from
+   inside its netns (`ip netns exec ue<i> ping 192.168.2.2`).
+3. **FT contention** (pulse `--ft N`) starts and warms `FT_WARMUP` (3 s).
+4. **server starts first** and streams; the path warms for `STREAM_WARMUP` (3 s).
+5. **client starts last** and measures under an already-established stream +
+   contention (so no cold-start / ramp is captured in the numbers).
+
 - **On exit — success, error, or Ctrl-C — every experiment process on all three
   hosts is killed** (video server/client, FT servers/clients). The PTP time-sync
   tmux sessions (`ptp`/`ptps`/`phy`/`tg`) are never touched.

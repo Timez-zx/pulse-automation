@@ -68,6 +68,9 @@ S_FTP = "pv_ft"                   # FT clients on edge0 (pv_ft1..pv_ftN)
 
 FT_WARMUP = 3.0                   # let contention ramp before the stream starts
 FT_COOLDOWN = 2.0                 # keep contention alive a bit past stream end
+STREAM_WARMUP = 3.0               # stream the video this long (path warms) before measuring
+PREFLIGHT_TARGET = "192.168.2.2"  # edge0 direct-link IP, pingable from each sim-UE netns
+PREFLIGHT_PI_5G_COUNT = 5         # edge0->Pi 5G warm-up pings (wake RRC + confirm reach)
 
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=10"]
 
@@ -179,6 +182,39 @@ def preflight(mode: str, video_file: str, ft: int) -> None:
     log("preflight ok")
 
 
+def connectivity_check(mode: str, ft: int) -> bool:
+    """Ping every UE / path this run will use, to warm the radio (RRC idle->active)
+    and confirm reachability BEFORE the experiment. Returns False if any required
+    path is unreachable. Mirrors run_dl_measurements.py's warmup + preflight:
+    edge0->Pi over each link, and each FT sim-UE from its own netns."""
+    log("connectivity check / warmup (ping all used UEs) ...")
+    ok = True
+    # Pi over WiFi — used by both modes (pulse base+enh link B / hevc single stream)
+    wifi_ok = "OK" in ssh_out(
+        EDGE0, f"ping -c3 -i0.2 -W2 -I {EDGE0_WIFI} {PI_WIFI} >/dev/null 2>&1 "
+               f"&& echo OK || echo FAIL", timeout=20)
+    log(f"  Pi WiFi  {PI_WIFI:<15} {'OK' if wifi_ok else 'FAIL'}")
+    ok = ok and wifi_ok
+    # Pi over 5G — pulse base link A; the pings also wake the modem from RRC-idle
+    if mode == "pulse":
+        g5_ok = "OK" in ssh_out(
+            EDGE0, f"ping -c{PREFLIGHT_PI_5G_COUNT} -i0.2 -W2 -I {EDGE0_5G} {PI_5G} "
+                   f">/dev/null 2>&1 && echo OK || echo FAIL", timeout=20)
+        log(f"  Pi 5G    {PI_5G:<15} {'OK' if g5_ok else 'FAIL'}")
+        ok = ok and g5_ok
+    # each FT sim-UE, pinged from inside its netns (uplink to edge0) — confirms attach
+    if ft > 0 and mode == "pulse":
+        for i in range(1, ft + 1):
+            rc = subprocess.run(
+                ["ip", "netns", "exec", f"ue{i}", "ping", "-c", "3",
+                 "-i", "0.2", "-W", "2", PREFLIGHT_TARGET],
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode
+            ue_ok = rc == 0
+            log(f"  ue{i:<2} ({ue_ip(i)}) -> {PREFLIGHT_TARGET}  {'OK' if ue_ok else 'FAIL'}")
+            ok = ok and ue_ok
+    return ok
+
+
 # --------------------------------------------------------------- FT control ---
 def start_ft(ft: int, ft_duration: float, logdir: Path) -> None:
     """Start FT servers in local netns ue1..ueN and FT clients on edge0 (-> 5G)."""
@@ -212,27 +248,12 @@ def run(mode: str, video_file: str, duration: float, ft: int,
 
     # 1) FT contention first (pulse only), then let it ramp
     if ft > 0 and mode == "pulse":
-        start_ft(ft, FT_WARMUP + duration + FT_COOLDOWN, logdir)
+        start_ft(ft, FT_WARMUP + STREAM_WARMUP + duration + FT_COOLDOWN, logdir)
         log(f"warming contention {FT_WARMUP:g}s ...")
         time.sleep(FT_WARMUP)
 
-    # 2) client on pi (default CSV naming: results/<mode>_snr_<tag>_<ts>.csv)
-    if mode == "pulse":
-        cli = (f"cd {PULSE_DIR} && mkdir -p results && "
-               f"bin/pulse_client --listen-a 0.0.0.0:{PORT_A} --listen-b 0.0.0.0:{PORT_B} "
-               f"--skip-ms {skip_ms} --enh-wait-ms {enh_wait_ms} "
-               f"--frames {frames} --tag {tag} >/tmp/{S_CLI}.log 2>&1")
-    else:
-        cli = (f"cd {PULSE_DIR} && mkdir -p results && "
-               f"bin/pulse_client --single --listen-a 0.0.0.0:{PORT_SINGLE} "
-               f"--frames {frames} --tag {tag} >/tmp/{S_CLI}.log 2>&1")
-    ssh(PI, f"tmux kill-session -t {S_CLI} 2>/dev/null; "
-            f"tmux new-session -d -s {S_CLI} '{cli}'", timeout=20)
-    if "1" not in ssh_out(PI, f"tmux has-session -t {S_CLI} 2>/dev/null && echo 1 || echo 0"):
-        raise RuntimeError("client failed to start on pi (see /tmp/pv_cli.log)")
-    log(f"client started on pi ({frames} frames @ {FPS}fps ~= {duration:g}s)")
-
-    # 3) server on edge0
+    # 2) server on edge0 FIRST — start streaming so the radio/path is warm and
+    #    contention is fully established before the client begins measuring
     src = f"{VIDEO_DIR}/{video_file}"
     if mode == "pulse":
         srv = (f"cd {PULSE_DIR} && bin/pulse_server_file --src {src} "
@@ -249,7 +270,28 @@ def run(mode: str, video_file: str, duration: float, ft: int,
         raise RuntimeError("server failed to start on edge0 (see /tmp/pv_srv.log)")
     log("server started on edge0; streaming ...")
 
-    # 4) wait for the client to finish (it stops at --frames), with a margin
+    # 3) warm the streaming path before measuring (server is already sending)
+    log(f"warming stream {STREAM_WARMUP:g}s before measuring ...")
+    time.sleep(STREAM_WARMUP)
+
+    # 4) client on pi (measures under an established stream + contention).
+    #    Default CSV naming: results/<mode>_snr_<tag>_<ts>.csv
+    if mode == "pulse":
+        cli = (f"cd {PULSE_DIR} && mkdir -p results && "
+               f"bin/pulse_client --listen-a 0.0.0.0:{PORT_A} --listen-b 0.0.0.0:{PORT_B} "
+               f"--skip-ms {skip_ms} --enh-wait-ms {enh_wait_ms} "
+               f"--frames {frames} --tag {tag} >/tmp/{S_CLI}.log 2>&1")
+    else:
+        cli = (f"cd {PULSE_DIR} && mkdir -p results && "
+               f"bin/pulse_client --single --listen-a 0.0.0.0:{PORT_SINGLE} "
+               f"--frames {frames} --tag {tag} >/tmp/{S_CLI}.log 2>&1")
+    ssh(PI, f"tmux kill-session -t {S_CLI} 2>/dev/null; "
+            f"tmux new-session -d -s {S_CLI} '{cli}'", timeout=20)
+    if "1" not in ssh_out(PI, f"tmux has-session -t {S_CLI} 2>/dev/null && echo 1 || echo 0"):
+        raise RuntimeError("client failed to start on pi (see /tmp/pv_cli.log)")
+    log(f"client started on pi ({frames} frames @ {FPS}fps ~= {duration:g}s); measuring ...")
+
+    # 5) wait for the client to finish (it stops at --frames), with a margin
     deadline = time.time() + duration + 60
     while time.time() < deadline:
         time.sleep(5)
@@ -259,7 +301,7 @@ def run(mode: str, video_file: str, duration: float, ft: int,
     else:
         log("client did not finish within margin; forcing stop")
 
-    # 5) stop server + FT (client already exited)
+    # 6) stop server + FT (client already exited)
     ssh(EDGE0, f"tmux kill-session -t {S_SRV} 2>/dev/null; true", timeout=15)
 
 
@@ -373,10 +415,11 @@ def main() -> None:
     preflight(args.mode, video_file, ft)
     cleanup_all(reason="pre-run stale sweep")
 
-    # warm 5G (RRC idle->active) before a pulse run so frame 0 isn't a cold spike
-    if args.mode == "pulse":
-        log("warming 5G ...")
-        ssh(EDGE0, f"ping -c8 -i0.2 -W2 -I {EDGE0_5G} {PI_5G} >/dev/null 2>&1; true", timeout=20)
+    # warm + confirm every UE/path used, before touching the experiment
+    if not connectivity_check(args.mode, ft):
+        cleanup_all(reason="connectivity check failed")
+        sys.exit("connectivity check FAILED (see above) — bring the UE(s)/path up "
+                 "(e.g. `ssh rpi sudo /home/zx/5g-up.sh`, or restart LTE on amari) and retry")
 
     try:
         run(args.mode, video_file, args.duration, ft,
