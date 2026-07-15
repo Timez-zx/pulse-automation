@@ -5,3 +5,4 @@ logs/
 # python
 __pycache__/
 *.pyc
+figures/
