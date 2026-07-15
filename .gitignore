@@ -1,0 +1,7 @@
+# experiment outputs (pulled CSVs) and per-run logs
+results/
+logs/
+
+# python
+__pycache__/
+*.pyc
