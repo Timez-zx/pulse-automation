@@ -1,11 +1,29 @@
 # pulse-automation
 
-One-button driver for the **pulse-codec streaming latency** experiment (edge0 → Pi
-real 5G UE). Run it on **amari** (this host).
+One-button drivers for the **pulse-codec streaming latency** experiments. Run on
+**amari** (this host).
+
+- **`run_stream_latency.py`** — edge0 → **Pi** (real 5G UE): pulse two-stream
+  (base 5G / base+enh WiFi) or hevc single-stream (WiFi), optional 5G FT
+  contention. Client runs on the Pi. *(needs `sudo` for `--ft`)*
+- **`run_hevc_wifi.py`** — edge0 → **amari** (this host) over **WiFi**: hevc
+  single-stream only; the measuring client runs **locally** on amari. No sudo.
 
 ```
 sudo python3 run_stream_latency.py --mode <pulse|hevc> --video <name> [options]
+     python3 run_hevc_wifi.py --video <name> [--duration 200]
 ```
+
+`run_hevc_wifi.py`: streams a `.hevc` clip from edge0 (`--bind 192.168.1.150`)
+to amari's WiFi `wlp0s20f0u5` (`192.168.1.159:9000`); server-first + 3 s stream
+warmup + edge0→amari ping check, then `pulse_client --single` measures locally.
+CSV auto-named to `results/` (`hevc_snr_<clip>_<ts>.csv`). All processes cleaned
+up on exit. Requires `bin/pulse_client` built on amari
+(`cd /root/pulse-codec && make bin/pulse_client`).
+
+---
+
+## run_stream_latency.py (edge0 → Pi)
 
 ## Modes
 
