@@ -1,5 +1,5 @@
 # experiment outputs (pulled CSVs) and per-run logs
-results/
+results*
 logs/
 
 # python
