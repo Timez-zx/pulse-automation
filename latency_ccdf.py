@@ -113,7 +113,7 @@ def main():
     os.makedirs(FIGURES_DIR, exist_ok=True)
     out = args.out or os.path.join(FIGURES_DIR, f"ccdf_compare_{PULSE_METRIC}.png")
 
-    print(f"{'series':<16} {'n':>7} {'p50':>7} {'p95':>7} {'p99':>7} {'max':>8}")
+    print(f"{'series':<16} {'n':>7} {'p50':>7} {'p95':>7} {'p99':>7} {'p99.9':>7} {'max':>8}")
     with plt.rc_context(RC_STYLE):
         fig, ax = plt.subplots(figsize=(9, 6))
         plotted = 0
@@ -137,7 +137,8 @@ def main():
                     markeredgewidth=1.0, markeredgecolor="white",
                     linewidth=2.4, zorder=3)
             print(f"{s['label']:<16} {n:>7} {pct(vals,.5):>7.2f} "
-                  f"{pct(vals,.95):>7.2f} {pct(vals,.99):>7.2f} {max(vals):>8.2f}")
+                  f"{pct(vals,.95):>7.2f} {pct(vals,.99):>7.2f} {pct(vals,.999):>7.2f} "
+                  f"{max(vals):>8.2f}")
             plotted += 1
         if not plotted:
             sys.exit(f"no CSVs matched in {args.results}")

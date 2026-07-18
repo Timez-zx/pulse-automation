@@ -197,7 +197,7 @@ def analyze(path):
     print("\n----- analysis -----")
     print(f"HEVC single-stream (edge0 -> amari WiFi), frames={len(rows)}")
     print(f"  one-way ms: p50 {_pct(v,.5):.2f}  p95 {_pct(v,.95):.2f}  "
-          f"p99 {_pct(v,.99):.2f}  max {max(v):.2f}  (n={len(v)})")
+          f"p99 {_pct(v,.99):.2f}  p99.9 {_pct(v,.999):.2f}  max {max(v):.2f}  (n={len(v)})")
 
 
 # -------------------------------------------------------------------- main ---

@@ -349,7 +349,7 @@ def analyze(mode: str, path: Path) -> None:
             print("no samples"); return
         print(f"HEVC single-stream (WiFi), frames={len(rows)}")
         print(f"  one-way ms: p50 {_pct(v,.5):.2f}  p95 {_pct(v,.95):.2f}  "
-              f"p99 {_pct(v,.99):.2f}  max {max(v):.2f}")
+              f"p99 {_pct(v,.99):.2f}  p99.9 {_pct(v,.999):.2f}  max {max(v):.2f}")
         return
     base = [x for x in (_num(r[1]) for r in rows if len(r) > 1) if x is not None]
     enh = [x for x in (_num(r[2]) for r in rows if len(r) > 2) if x is not None]
@@ -360,10 +360,10 @@ def analyze(mode: str, path: Path) -> None:
     print(f"PULSE two-stream (base=5G, base+enh=WiFi), frames={len(rows)}")
     if base:
         print(f"  base one-way ms: p50 {_pct(base,.5):.2f}  p95 {_pct(base,.95):.2f}  "
-              f"p99 {_pct(base,.99):.2f}  max {max(base):.2f}")
+              f"p99 {_pct(base,.99):.2f}  p99.9 {_pct(base,.999):.2f}  max {max(base):.2f}")
     if enh:
         print(f"  enh  one-way ms: p50 {_pct(enh,.5):.2f}  p95 {_pct(enh,.95):.2f}  "
-              f"p99 {_pct(enh,.99):.2f}  max {max(enh):.2f}  (n={len(enh)})")
+              f"p99 {_pct(enh,.99):.2f}  p99.9 {_pct(enh,.999):.2f}  max {max(enh):.2f}  (n={len(enh)})")
     if st:
         print(f"  enh_state: {st}")
 
